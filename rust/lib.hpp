@@ -3,6 +3,7 @@
 
 // We don't have to forward decalre all of those:
 struct Matches;
+struct Cluster;
 struct IndexOptions;
 enum class MetricKind;
 enum class ScalarKind;
@@ -51,6 +52,12 @@ class NativeIndex {
     size_t get_f16(vector_key_t key, rust::Slice<int16_t> vector) const;
     size_t get_f32(vector_key_t key, rust::Slice<float> vector) const;
     size_t get_f64(vector_key_t key, rust::Slice<double> vector) const;
+
+    Cluster cluster_b1x8(rust::Slice<uint8_t const> query, size_t level) const;
+    Cluster cluster_i8(rust::Slice<int8_t const> query, size_t level) const;
+    Cluster cluster_f16(rust::Slice<int16_t const> query, size_t level) const;
+    Cluster cluster_f32(rust::Slice<float const> query, size_t level) const;
+    Cluster cluster_f64(rust::Slice<double const> query, size_t level) const;
 
     size_t expansion_add() const;
     size_t expansion_search() const;

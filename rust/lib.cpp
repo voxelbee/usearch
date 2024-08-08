@@ -7,6 +7,7 @@ using namespace unum;
 using index_t = index_dense_t;
 using add_result_t = typename index_t::add_result_t;
 using search_result_t = typename index_t::search_result_t;
+using cluster_result_t = typename index_t::cluster_result_t;
 using labeling_result_t = typename index_t::labeling_result_t;
 using vector_key_t = typename index_dense_t::vector_key_t;
 
@@ -54,6 +55,19 @@ Matches search_(index_dense_t& index, scalar_at const* vec, size_t vec_dims, siz
     return matches;
 }
 
+template <typename scalar_at>
+Cluster cluster_(index_dense_t& index, scalar_at const* vec, size_t vec_dims, size_t level) {
+    if (vec_dims != index.scalar_words())
+        throw std::invalid_argument("Vector length must match index dimensionality");
+    Cluster cluster;
+    cluster_result_t result = index.cluster(vec, level);
+    result.error.raise();
+
+    cluster.key = result.cluster.member.key;
+    cluster.distance = result.cluster.distance;
+    return cluster;
+}
+
 template <typename scalar_at> void add_(index_dense_t& index, vector_key_t key, scalar_at const* vec, size_t vec_dims) {
     if (vec_dims != index.scalar_words())
         throw std::invalid_argument("Vector length must match index dimensionality");
@@ -94,6 +108,12 @@ size_t NativeIndex::get_i8(vector_key_t key, rust::Slice<int8_t> vec) const { if
 size_t NativeIndex::get_f16(vector_key_t key, rust::Slice<int16_t> vec) const { if (vec.size() % dimensions()) throw std::invalid_argument("Vector length must match index dimensionality"); return index_->get(key, (f16_t*)vec.data(), vec.size() / dimensions()); }
 size_t NativeIndex::get_f32(vector_key_t key, rust::Slice<float> vec) const { if (vec.size() % dimensions()) throw std::invalid_argument("Vector length must match index dimensionality"); return index_->get(key, vec.data(), vec.size() / dimensions()); }
 size_t NativeIndex::get_f64(vector_key_t key, rust::Slice<double> vec) const { if (vec.size() % dimensions()) throw std::invalid_argument("Vector length must match index dimensionality"); return index_->get(key, vec.data(), vec.size() / dimensions()); }
+
+Cluster NativeIndex::cluster_b1x8(rust::Slice<uint8_t const> vec, size_t level) const { return cluster_(*index_, (b1x8_t const*)vec.data(), vec.size(), level); }
+Cluster NativeIndex::cluster_i8(rust::Slice<int8_t const> vec, size_t level) const { return cluster_(*index_, vec.data(), vec.size(), level); }
+Cluster NativeIndex::cluster_f16(rust::Slice<int16_t const> vec, size_t level) const { return cluster_(*index_, (f16_t const*)vec.data(), vec.size(), level); }
+Cluster NativeIndex::cluster_f32(rust::Slice<float const> vec, size_t level) const { return cluster_(*index_, vec.data(), vec.size(), level); }
+Cluster NativeIndex::cluster_f64(rust::Slice<double const> vec, size_t level) const { return cluster_(*index_, vec.data(), vec.size(), level); }
 // clang-format on
 
 size_t NativeIndex::expansion_add() const { return index_->expansion_add(); }

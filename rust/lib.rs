@@ -294,6 +294,12 @@ pub mod ffi {
         distances: Vec<f32>,
     }
 
+    #[derive(Debug)]
+    struct Cluster {
+        key: u64,
+        distance: f32,
+    }
+
     /// The index options used to configure the dense index during creation.
     /// It contains the number of dimensions, the metric kind, the scalar kind,
     /// the connectivity, the expansion values, and the multi-flag.
@@ -389,6 +395,12 @@ pub mod ffi {
         pub fn get_f16(self: &NativeIndex, key: u64, buffer: &mut [i16]) -> Result<usize>;
         pub fn get_f32(self: &NativeIndex, key: u64, buffer: &mut [f32]) -> Result<usize>;
         pub fn get_f64(self: &NativeIndex, key: u64, buffer: &mut [f64]) -> Result<usize>;
+
+        pub fn cluster_b1x8(self: &NativeIndex, query: &[u8], level: usize) -> Result<Cluster>;
+        pub fn cluster_i8(self: &NativeIndex, query: &[i8], level: usize) -> Result<Cluster>;
+        pub fn cluster_f16(self: &NativeIndex, query: &[i16], level: usize) -> Result<Cluster>;
+        pub fn cluster_f32(self: &NativeIndex, query: &[f32], level: usize) -> Result<Cluster>;
+        pub fn cluster_f64(self: &NativeIndex, query: &[f64], level: usize) -> Result<Cluster>;
 
         pub fn remove(self: &NativeIndex, key: u64) -> Result<usize>;
         pub fn rename(self: &NativeIndex, from: u64, to: u64) -> Result<usize>;
@@ -609,6 +621,10 @@ pub trait VectorType {
         Self: Sized,
         F: Fn(Key) -> bool;
 
+    fn cluster(index: &Index, query: &[Self], level: usize) -> Result<ffi::Cluster, cxx::Exception>
+    where
+        Self: Sized;
+
     /// Changes the metric used for distance calculations within the index.
     ///
     /// # Parameters
@@ -630,6 +646,13 @@ pub trait VectorType {
 impl VectorType for f32 {
     fn search(index: &Index, query: &[Self], count: usize) -> Result<ffi::Matches, cxx::Exception> {
         index.inner.search_f32(query, count)
+    }
+    fn cluster(
+        index: &Index,
+        query: &[Self],
+        level: usize,
+    ) -> Result<ffi::Cluster, cxx::Exception> {
+        index.inner.cluster_f32(query, level)
     }
     fn get(index: &Index, key: Key, vector: &mut [Self]) -> Result<usize, cxx::Exception> {
         index.inner.get_f32(key, vector)
@@ -699,6 +722,13 @@ impl VectorType for i8 {
     fn search(index: &Index, query: &[Self], count: usize) -> Result<ffi::Matches, cxx::Exception> {
         index.inner.search_i8(query, count)
     }
+    fn cluster(
+        index: &Index,
+        query: &[Self],
+        level: usize,
+    ) -> Result<ffi::Cluster, cxx::Exception> {
+        index.inner.cluster_i8(query, level)
+    }
     fn get(index: &Index, key: Key, vector: &mut [Self]) -> Result<usize, cxx::Exception> {
         index.inner.get_i8(key, vector)
     }
@@ -766,6 +796,13 @@ impl VectorType for f64 {
     fn search(index: &Index, query: &[Self], count: usize) -> Result<ffi::Matches, cxx::Exception> {
         index.inner.search_f64(query, count)
     }
+    fn cluster(
+        index: &Index,
+        query: &[Self],
+        level: usize,
+    ) -> Result<ffi::Cluster, cxx::Exception> {
+        index.inner.cluster_f64(query, level)
+    }
     fn get(index: &Index, key: Key, vector: &mut [Self]) -> Result<usize, cxx::Exception> {
         index.inner.get_f64(key, vector)
     }
@@ -832,6 +869,13 @@ impl VectorType for f64 {
 impl VectorType for f16 {
     fn search(index: &Index, query: &[Self], count: usize) -> Result<ffi::Matches, cxx::Exception> {
         index.inner.search_f16(f16::to_i16s(query), count)
+    }
+    fn cluster(
+        index: &Index,
+        query: &[Self],
+        level: usize,
+    ) -> Result<ffi::Cluster, cxx::Exception> {
+        index.inner.cluster_f16(f16::to_i16s(query), level)
     }
     fn get(index: &Index, key: Key, vector: &mut [Self]) -> Result<usize, cxx::Exception> {
         index.inner.get_f16(key, f16::to_mut_i16s(vector))
@@ -903,6 +947,13 @@ impl VectorType for f16 {
 impl VectorType for b1x8 {
     fn search(index: &Index, query: &[Self], count: usize) -> Result<ffi::Matches, cxx::Exception> {
         index.inner.search_b1x8(b1x8::to_u8s(query), count)
+    }
+    fn cluster(
+        index: &Index,
+        query: &[Self],
+        level: usize,
+    ) -> Result<ffi::Cluster, cxx::Exception> {
+        index.inner.cluster_b1x8(b1x8::to_u8s(query), level)
     }
     fn get(index: &Index, key: Key, vector: &mut [Self]) -> Result<usize, cxx::Exception> {
         index.inner.get_b1x8(key, b1x8::to_mut_u8s(vector))
@@ -1093,6 +1144,24 @@ impl Index {
         vector: &mut [T],
     ) -> Result<usize, cxx::Exception> {
         T::get(self, key, vector)
+    }
+
+    /// Identifies the closest cluster to the provided query.
+    ///
+    /// # Arguments
+    ///
+    /// * `query` - A slice containing the query vector data that will be compared against other entries in the index.
+    /// * `level` - The index level to target. Higher means lower resolution.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing the cluster found.
+    pub fn cluster<T: VectorType>(
+        self: &Index,
+        query: &[T],
+        level: usize,
+    ) -> Result<ffi::Cluster, cxx::Exception> {
+        T::cluster(self, query, level)
     }
 
     /// Extracts one or more vectors matching specified key into supplied resizable vector.
@@ -1440,6 +1509,29 @@ mod tests {
 
         assert!(index.search(&too_long, 1).is_err());
         assert!(index.search(&too_short, 1).is_err());
+    }
+
+    #[test]
+    fn test_cluster_vector() {
+        let mut options = IndexOptions::default();
+        options.dimensions = 2;
+        options.connectivity = 2;
+        options.quantization = ScalarKind::F32;
+        let index = Index::new(&options).unwrap();
+        assert!(index.reserve(10).is_ok());
+
+        let first: [f32; 2] = [0.0, 0.9];
+        let second: [f32; 2] = [0.0, 0.8];
+        let third: [f32; 2] = [0.7, 0.0];
+        let fourth: [f32; 2] = [0.6, 0.0];
+        assert!(index.add(1, &first).is_ok());
+        assert!(index.add(2, &second).is_ok());
+        assert!(index.add(3, &third).is_ok());
+        assert!(index.add(4, &fourth).is_ok());
+        assert_eq!(index.size(), 4);
+
+        assert_eq!(index.cluster(&[0.0, 0.85], 0).unwrap().key, 2);
+        assert_eq!(index.cluster(&[0.7, 0.0], 0).unwrap().key, 3);
     }
 
     #[test]
